@@ -6,25 +6,6 @@ using Win11Optimization.Core.Models;
 using Win11Optimization.Services.Helpers;
 
 namespace Win11Optimization.Services.Optimizations.Network;
-
-/// <summary>
-/// Комплексная оптимизация TCP/IP стека Windows 11.
-/// 
-/// Два уровня изменений:
-/// 
-/// 1. РЕЕСТР (HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters):
-///    - TcpTimedWaitDelay = 32  → сокеты в TIME_WAIT освобождаются за 32 сек (вместо 120)
-///    - DefaultTTL = 64         → оптимальный TTL для игровых серверов
-///    - MaxUserPort = 65534     → полный диапазон эфемерных портов
-/// 
-/// 2. NETSH (TCP Global Parameters):
-///    - autotuninglevel=normal  → динамическая подстройка окна приёма
-///    - timestamps=disabled     → убирает 12 байт overhead из каждого пакета
-///    - ecncapability=disabled  → совместимость с игровыми серверами/роутерами
-///    - rsc=disabled            → отключает аппаратную коалесценцию (снижает input lag)
-/// 
-/// Откат: реестр — из бэкапа, netsh — возврат к Windows defaults.
-/// </summary>
 public sealed class TcpOptimization : IOptimization
 {
     private const string TcpParamsSubKey = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
@@ -32,11 +13,6 @@ public sealed class TcpOptimization : IOptimization
 
     private readonly IBackupManager _backup;
     private readonly ILogger<TcpOptimization> _logger;
-
-    /// <summary>
-    /// Registry-параметры для оптимизации TCP/IP.
-    /// Формат: (имя значения, оптимальное значение, описание для лога).
-    /// </summary>
     private static readonly (string Name, int Value, string Description)[] RegistryParams =
     [
         ("TcpTimedWaitDelay", 32,
@@ -48,14 +24,6 @@ public sealed class TcpOptimization : IOptimization
         ("MaxUserPort", 65534,
             "Макс. эфемерный порт = 65534 (полный диапазон для исходящих соединений)")
     ];
-
-    /// <summary>
-    /// netsh-команды для оптимизации TCP стека.
-    /// Формат: (аргументы apply, аргументы rollback, описание).
-    /// 
-    /// Rollback использует Windows defaults, а не сохранённые значения,
-    /// потому что вывод `netsh show` зависит от локали (RU/EN).
-    /// </summary>
     private static readonly (string ApplyArgs, string RollbackArgs, string Description)[] NetshCommands =
     [
         ("int tcp set global autotuninglevel=normal",
@@ -88,12 +56,6 @@ public sealed class TcpOptimization : IOptimization
         _backup = backup;
         _logger = logger;
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Проверяет только registry-параметры (они — основной индикатор).
-    /// netsh-состояние не проверяется: парсинг вывода зависит от локали.
-    /// </remarks>
     public Task<bool> IsAppliedAsync(CancellationToken ct = default)
     {
         foreach (var (name, expectedValue, _) in RegistryParams)
@@ -105,19 +67,14 @@ public sealed class TcpOptimization : IOptimization
 
         return Task.FromResult(true);
     }
-
-    /// <inheritdoc />
     public async Task<OptimizationResult> ApplyAsync(CancellationToken ct = default)
     {
         var warnings = new List<string>();
 
         try
         {
-            // ── 1. Бэкап реестра ──────────────────────────
             _logger.LogInformation("Бэкап: {Path}", BackupRegistryPath);
             await _backup.BackupRegistryKeyAsync(Info.Id, BackupRegistryPath, ct);
-
-            // ── 2. Registry: TCP параметры ────────────────
             foreach (var (name, value, desc) in RegistryParams)
             {
                 var oldValue = RegistryHelper.GetDword(Registry.LocalMachine, TcpParamsSubKey, name);
@@ -126,14 +83,11 @@ public sealed class TcpOptimization : IOptimization
                     "{Name}: {Old} → {New} ({Desc})",
                     name, oldValue?.ToString() ?? "null", value, desc);
             }
-
-            // ── 3. netsh: TCP Global Parameters ───────────
             foreach (var (applyArgs, _, desc) in NetshCommands)
             {
                 var (success, error) = await RunNetshAsync(applyArgs, ct);
                 if (!success)
                 {
-                    // netsh ошибки не фатальны — добавляем как warning
                     warnings.Add($"{desc}: {error}");
                     _logger.LogWarning("netsh не применён: {Args} → {Error}", applyArgs, error);
                 }
@@ -155,20 +109,9 @@ public sealed class TcpOptimization : IOptimization
             return OptimizationResult.Failure($"Ошибка: {ex.Message}", warnings);
         }
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Двухэтапный откат:
-    /// 1. Реестр — восстановление из .reg бэкапа (точное)
-    /// 2. netsh — возврат к Windows defaults (приблизительное)
-    /// 
-    /// Если бэкап реестра отсутствует, netsh всё равно откатывается.
-    /// </remarks>
     public async Task<OptimizationResult> RollbackAsync(CancellationToken ct = default)
     {
         var warnings = new List<string>();
-
-        // ── 1. Откат реестра ──────────────────────────────
         var backups = await _backup.ListBackupsAsync(ct);
         var lastBackup = backups
             .Where(b => b.OptimizationId == Info.Id && b.Type == BackupType.RegistryKey)
@@ -193,8 +136,6 @@ public sealed class TcpOptimization : IOptimization
             warnings.Add("Бэкап реестра не найден — параметры реестра не восстановлены");
             _logger.LogWarning("Бэкап реестра не найден для {Id}", Info.Id);
         }
-
-        // ── 2. Откат netsh к defaults ─────────────────────
         foreach (var (_, rollbackArgs, desc) in NetshCommands)
         {
             var (success, error) = await RunNetshAsync(rollbackArgs, ct);
@@ -213,15 +154,6 @@ public sealed class TcpOptimization : IOptimization
             ? OptimizationResult.Success(warnings)
             : OptimizationResult.Success();
     }
-
-    // ── netsh helper ──────────────────────────────────────
-
-    /// <summary>
-    /// Выполняет команду netsh.exe и возвращает результат.
-    /// 
-    /// netsh — встроенная утилита Windows для настройки сетевого стека.
-    /// CreateNoWindow = true — не открывает окно консоли.
-    /// </summary>
     private static async Task<(bool Success, string Error)> RunNetshAsync(
         string args, CancellationToken ct)
     {
@@ -237,9 +169,6 @@ public sealed class TcpOptimization : IOptimization
         };
 
         process.Start();
-
-        // Читаем оба потока до WaitForExit, чтобы избежать
-        // deadlock на буфере (MSDN рекомендация)
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
 

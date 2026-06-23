@@ -1,39 +1,39 @@
+using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Win11Optimization.Core.Interfaces;
 using Win11Optimization.Core.Models;
+using Win11Optimization.Core.Localization;
+using Win11Optimization.Services.Helpers;
+using Microsoft.Win32;
 
 namespace Win11Optimization.Services.Optimizations.System;
 
-/// <summary>
-/// Оптимизация схемы электропитания (Power Plan).
-/// Устанавливает схему "Высокая производительность" (High Performance) для 
-/// отключения агрессивного энергосбережения CPU, парковки ядер и т.д.
-/// 
-/// Механизм: использует утилиту командной строки `powercfg.exe`.
-/// 
-/// Риск: Low (может увеличить энергопотребление на ноутбуках).
-/// </summary>
 public sealed class PowerPlanOptimization : IOptimization
 {
     private readonly ILogger<PowerPlanOptimization> _logger;
-    private const string HighPerformanceGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
+    private readonly IStateStorage _stateStorage;
+    private const string UltimatePerformanceGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61";
+    private const string StateKey = "PreviousPowerPlanGuid";
 
-    public OptimizationInfo Info => new(
-        Id: "system.power_plan",
-        Name: "Схема электропитания",
-        Description: "Включает схему 'Высокая производительность' (High Performance).",
-        Category: OptimizationCategory.System,
-        RiskLevel: RiskLevel.Low
+    public OptimizationInfo Info => new OptimizationInfo(
+        "ultimate_power_plan",
+        Strings.IsRussian ? "Ultimate Power Plan" : "Ultimate Power Plan",
+        Strings.IsRussian 
+            ? "Разблокирует и включает 'Максимальную производительность', отключает парковку ядер и энергосбережение USB."
+            : "Unlocks and enables 'Ultimate Performance' plan, disables core parking and USB selective suspend.",
+        OptimizationCategory.System,
+        RiskLevel.Low
     );
 
-    // Поскольку powercfg не поддерживает бэкапы через реестр, 
-    // сохранять оригинальную схему между перезапусками сложно без отдельного файла конфигурации.
-    // Пока реализуем только применение. В рамках реального приложения можно сохранять стейт в JSON.
-
-    public PowerPlanOptimization(ILogger<PowerPlanOptimization> logger)
+    public PowerPlanOptimization(ILogger<PowerPlanOptimization> logger, IStateStorage stateStorage)
     {
         _logger = logger;
+        _stateStorage = stateStorage;
     }
 
     public async Task<bool> IsAppliedAsync(CancellationToken ct = default)
@@ -41,41 +41,51 @@ public sealed class PowerPlanOptimization : IOptimization
         var (success, output, _) = await RunPowercfgAsync("/getactivescheme", ct);
         if (!success) return false;
 
-        return output.Contains(HighPerformanceGuid, StringComparison.OrdinalIgnoreCase);
+        return output.Contains(UltimatePerformanceGuid, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task<OptimizationResult> ApplyAsync(CancellationToken ct = default)
     {
-        var warnings = new List<string>();
-
-        // Проверяем, активна ли уже схема
-        if (await IsAppliedAsync(ct))
+        if (await IsAppliedAsync(ct)) return OptimizationResult.Success();
+        var (s, activeOut, _) = await RunPowercfgAsync("/getactivescheme", ct);
+        if (s)
         {
-            return OptimizationResult.Success();
+            var match = Regex.Match(activeOut, @"([0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12})", RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                var guid = match.Groups[1].Value;
+                await _stateStorage.SetStateAsync(Info.Id, StateKey, guid, ct);
+            }
         }
-
-        var (success, _, error) = await RunPowercfgAsync($"/setactive {HighPerformanceGuid}", ct);
-
-        if (!success)
+        var (listS, listOut, _) = await RunPowercfgAsync("/list", ct);
+        if (listS && !listOut.Contains(UltimatePerformanceGuid, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogError("Не удалось установить схему электропитания: {Error}", error);
-            return OptimizationResult.Failure($"Ошибка powercfg: {error}", warnings);
+            await RunPowercfgAsync($"-duplicatescheme {UltimatePerformanceGuid}", ct);
         }
+        var (setS, _, error) = await RunPowercfgAsync($"/setactive {UltimatePerformanceGuid}", ct);
+        if (!setS)
+            return OptimizationResult.Failure($"powercfg error: {error}");
+        await RunPowercfgAsync($"/setacvalueindex {UltimatePerformanceGuid} 2a737441-1930-4402-8d77-b2bea1222653 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0", ct);
+        await RunPowercfgAsync($"/setdcvalueindex {UltimatePerformanceGuid} 2a737441-1930-4402-8d77-b2bea1222653 48e6b7a6-50f5-4782-a5d4-53bb8f07e226 0", ct);
+        RegistryHelper.SetDword(Registry.LocalMachine, @"SYSTEM\CurrentControlSet\Control\Power\PowerSettings\54533251-82be-4824-96c1-47b60b740d00\0cc5b647-c1df-4637-891a-dec35c318583", "Attributes", 0);
+        await RunPowercfgAsync($"/setacvalueindex {UltimatePerformanceGuid} SUB_PROCESSOR CPMINCORES 100", ct);
+        await RunPowercfgAsync($"/setactive {UltimatePerformanceGuid}", ct);
 
-        _logger.LogInformation("Схема электропитания изменена на 'Высокая производительность'.");
         return OptimizationResult.Success();
     }
 
-    public Task<OptimizationResult> RollbackAsync(CancellationToken ct = default)
+    public async Task<OptimizationResult> RollbackAsync(CancellationToken ct = default)
     {
-        // Для полноценного отката необходимо сохранять GUID предыдущей схемы.
-        // Здесь для упрощения мы возвращаем сбалансированную схему (Windows Default).
-        const string BalancedGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
-        
-        RunPowercfgAsync($"/setactive {BalancedGuid}", ct).GetAwaiter().GetResult();
-        
-        _logger.LogInformation("Схема электропитания сброшена на 'Сбалансированная'.");
-        return Task.FromResult(OptimizationResult.Success(new[] { "Установлена стандартная 'Сбалансированная' схема." }));
+        var prevGuid = await _stateStorage.GetStateAsync<string>(Info.Id, StateKey, ct);
+        if (string.IsNullOrEmpty(prevGuid))
+        {
+            prevGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
+        }
+
+        await RunPowercfgAsync($"/setactive {prevGuid}", ct);
+        await _stateStorage.ClearStateAsync(Info.Id, StateKey, ct);
+
+        return OptimizationResult.Success();
     }
 
     private static async Task<(bool Success, string Output, string Error)> RunPowercfgAsync(

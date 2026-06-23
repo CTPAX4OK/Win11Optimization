@@ -6,21 +6,6 @@ using Win11Optimization.Core.Models;
 using Win11Optimization.Services.Helpers;
 
 namespace Win11Optimization.Services.Optimizations.Network;
-
-/// <summary>
-/// Отключение Nagle's Algorithm для всех активных сетевых адаптеров.
-/// 
-/// Nagle's Algorithm буферизует мелкие TCP-пакеты и отправляет их пачкой,
-/// что экономит bandwidth, но добавляет задержку (до 200 мс по RFC, обычно 5–20 мс).
-/// Для игр, где каждый тик отправляет маленький пакет (64–256 байт), это критично.
-/// 
-/// Что делает:
-/// - TCPNoDelay = 1 → отключает буферизацию (отправка немедленно)
-/// - TcpAckFrequency = 1 → подтверждение каждого пакета (вместо отложенного ACK)
-/// 
-/// Изменения применяются PER-ADAPTER через реестр:
-/// HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{GUID}
-/// </summary>
 public sealed class NagleOptimization : IOptimization
 {
     private const string InterfacesSubKey = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces";
@@ -42,13 +27,6 @@ public sealed class NagleOptimization : IOptimization
         _backup = backup;
         _logger = logger;
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Проверяет, что TCPNoDelay=1 и TcpAckFrequency=1 установлены
-    /// для ВСЕХ активных сетевых адаптеров. Если хотя бы у одного
-    /// адаптера значения не установлены — возвращает false.
-    /// </remarks>
     public Task<bool> IsAppliedAsync(CancellationToken ct = default)
     {
         var guids = GetActiveAdapterGuids();
@@ -68,20 +46,14 @@ public sealed class NagleOptimization : IOptimization
 
         return Task.FromResult(true);
     }
-
-    /// <inheritdoc />
     public async Task<OptimizationResult> ApplyAsync(CancellationToken ct = default)
     {
         var guids = GetActiveAdapterGuids();
 
         if (guids.Count == 0)
             return OptimizationResult.Failure("Не найдены активные сетевые адаптеры");
-
-        // 1. Бэкап всей ветки Interfaces (включает все адаптеры)
         _logger.LogInformation("Бэкап ветки реестра: {Path}", BackupRegistryPath);
         await _backup.BackupRegistryKeyAsync(Info.Id, BackupRegistryPath, ct);
-
-        // 2. Применяем к каждому активному адаптеру
         var warnings = new List<string>();
         var applied = 0;
 
@@ -90,11 +62,7 @@ public sealed class NagleOptimization : IOptimization
             try
             {
                 var subKeyPath = $@"{InterfacesSubKey}\{guid}";
-
-                // TCPNoDelay = 1: отключает алгоритм Нейгла
                 RegistryHelper.SetDword(Registry.LocalMachine, subKeyPath, "TCPNoDelay", 1);
-
-                // TcpAckFrequency = 1: немедленное подтверждение (вместо delayed ACK)
                 RegistryHelper.SetDword(Registry.LocalMachine, subKeyPath, "TcpAckFrequency", 1);
 
                 applied++;
@@ -122,12 +90,6 @@ public sealed class NagleOptimization : IOptimization
             ? OptimizationResult.Success(warnings)
             : OptimizationResult.Success();
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Восстанавливает всю ветку Interfaces из последнего бэкапа.
-    /// Бэкап ищется по optimizationId = "net.nagle_disable".
-    /// </remarks>
     public async Task<OptimizationResult> RollbackAsync(CancellationToken ct = default)
     {
         var backups = await _backup.ListBackupsAsync(ct);
@@ -143,16 +105,6 @@ public sealed class NagleOptimization : IOptimization
         _logger.LogInformation("Откат Nagle из бэкапа: {Id}", lastBackup.Id);
         return await _backup.RestoreRegistryKeyAsync(lastBackup.Id, ct);
     }
-
-    // ── Обнаружение адаптеров ──────────────────────────────
-
-    /// <summary>
-    /// Возвращает GUID'ы активных сетевых адаптеров через System.Net.NetworkInformation.
-    /// Исключает Loopback (127.0.0.1) — он не участвует в сетевых играх.
-    /// 
-    /// GUID адаптера совпадает с именем подключа в реестре:
-    /// HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\Interfaces\{GUID}
-    /// </summary>
     private static List<string> GetActiveAdapterGuids()
     {
         return NetworkInterface.GetAllNetworkInterfaces()

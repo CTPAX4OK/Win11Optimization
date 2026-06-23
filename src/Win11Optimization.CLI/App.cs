@@ -2,13 +2,9 @@ using Microsoft.Extensions.Logging;
 using Spectre.Console;
 using Win11Optimization.Core.Interfaces;
 using Win11Optimization.Core.Models;
+using Win11Optimization.Core.Localization;
 
 namespace Win11Optimization.CLI;
-
-/// <summary>
-/// Главный класс приложения — интерактивное CLI-меню.
-/// Получает зависимости через DI и управляет циклом взаимодействия.
-/// </summary>
 public sealed class App
 {
     private readonly IReadOnlyList<IOptimization> _optimizations;
@@ -28,64 +24,54 @@ public sealed class App
         _logger = logger;
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  Точка входа
-    // ═══════════════════════════════════════════════════════
-
     public async Task<int> RunAsync()
     {
         ShowBanner();
         ShowSystemInfo();
 
-        AnsiConsole.MarkupLine($"[green][[✓]][/] Модули оптимизации: [cyan]{_optimizations.Count}[/]");
+        AnsiConsole.MarkupLine($"[green][[✓]][/] {(Strings.IsRussian ? "Модули оптимизации" : "Optimization modules")}: [cyan]{_optimizations.Count}[/]");
         AnsiConsole.WriteLine();
-
-        // Главный цикл
         while (true)
         {
             var choice = AnsiConsole.Prompt(
                 new SelectionPrompt<string>()
-                    .Title("[bold cyan]═══ Главное меню ═══[/]")
+                    .Title($"[bold cyan]═══ {Strings.Title} ═══[/]")
                     .HighlightStyle(new Style(Color.Cyan1))
                     .AddChoices(
-                        "📊  Статус оптимизаций",
-                        "🚀  Применить оптимизации",
-                        "↩️   Откатить оптимизации",
-                        "💾  Создать точку восстановления",
-                        "📋  Управление бэкапами",
-                        "❌  Выход"));
+                        Strings.StatusOption,
+                        Strings.ApplyOption,
+                        Strings.RollbackOption,
+                        Strings.BackupOption,
+                        Strings.ManageBackupsOption,
+                        Strings.ChangeLanguageOption,
+                        Strings.ExitOption));
 
             AnsiConsole.WriteLine();
 
-            switch (choice)
+            if (choice == Strings.StatusOption)
+                await ShowStatusAsync();
+            else if (choice == Strings.ApplyOption)
+                await ApplyOptimizationsAsync();
+            else if (choice == Strings.RollbackOption)
+                await RollbackOptimizationsAsync();
+            else if (choice == Strings.BackupOption)
+                await CreateRestorePointAsync();
+            else if (choice == Strings.ManageBackupsOption)
+                await ShowBackupsAsync();
+            else if (choice == Strings.ChangeLanguageOption)
             {
-                case "📊  Статус оптимизаций":
-                    await ShowStatusAsync();
-                    break;
-                case "🚀  Применить оптимизации":
-                    await ApplyOptimizationsAsync();
-                    break;
-                case "↩️   Откатить оптимизации":
-                    await RollbackOptimizationsAsync();
-                    break;
-                case "💾  Создать точку восстановления":
-                    await CreateRestorePointAsync();
-                    break;
-                case "📋  Управление бэкапами":
-                    await ShowBackupsAsync();
-                    break;
-                case "❌  Выход":
-                    AnsiConsole.MarkupLine("[grey]До свидания![/]");
-                    return 0;
+                Strings.ForceEnglish = !Strings.ForceEnglish;
+                AnsiConsole.MarkupLine(Strings.IsRussian ? "[green]Язык изменен на Русский.[/]" : "[green]Language changed to English.[/]");
+            }
+            else if (choice == Strings.ExitOption)
+            {
+                AnsiConsole.MarkupLine(Strings.IsRussian ? "[grey]До свидания![/]" : "[grey]Goodbye![/]");
+                return 0;
             }
 
             AnsiConsole.WriteLine();
         }
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  Баннер и системная информация
-    // ═══════════════════════════════════════════════════════
 
     private void ShowBanner()
     {
@@ -93,21 +79,29 @@ public sealed class App
             new FigletText("Win11 Optimizer")
                 .Color(Color.Cyan1));
 
-        AnsiConsole.MarkupLine("[grey]v0.1.0 | Модульный оптимизатор Windows 11 | MIT License[/]");
+        AnsiConsole.MarkupLine("[grey]v1.0.0 | Модульный оптимизатор Windows 11 | MIT License[/]");
         AnsiConsole.WriteLine();
     }
 
     private void ShowSystemInfo()
     {
+        var osLabel = Strings.IsRussian ? "ОС" : "OS";
+        var versionLabel = Strings.IsRussian ? "Версия" : "Version";
+        var buildLabel = Strings.IsRussian ? "Сборка" : "Build";
+        var win11Label = Strings.IsRussian ? "Windows 11" : "Windows 11";
+        var adminLabel = Strings.IsRussian ? "Администратор" : "Administrator";
+        var yesStr = Strings.IsRussian ? "Да" : "Yes";
+        var noStr = Strings.IsRussian ? "Нет" : "No";
+
         var panel = new Panel(
             new Markup(string.Join("\n",
-                $"[bold]ОС:[/]           {Markup.Escape(_sysInfo.OsEdition)}",
-                $"[bold]Версия:[/]       {Markup.Escape(_sysInfo.OsVersion)}",
-                $"[bold]Сборка:[/]       {Markup.Escape(_sysInfo.OsBuild)}",
-                $"[bold]Windows 11:[/]   {(_sysInfo.IsWindows11 ? "[green]Да[/]" : "[red]Нет[/]")}",
-                $"[bold]Администратор:[/] {(_sysInfo.IsAdministrator ? "[green]Да[/]" : "[red]Нет[/]")}"
+                $"[bold]{osLabel}:[/]           {Markup.Escape(_sysInfo.OsEdition)}",
+                $"[bold]{versionLabel}:[/]       {Markup.Escape(_sysInfo.OsVersion)}",
+                $"[bold]{buildLabel}:[/]       {Markup.Escape(_sysInfo.OsBuild)}",
+                $"[bold]{win11Label}:[/]   {(_sysInfo.IsWindows11 ? $"[green]{yesStr}[/]" : $"[red]{noStr}[/]")}",
+                $"[bold]{adminLabel}:[/] {(_sysInfo.IsAdministrator ? $"[green]{yesStr}[/]" : $"[red]{noStr}[/]")}"
             )))
-            .Header("[bold cyan]Система[/]")
+            .Header($"[bold cyan]{(Strings.IsRussian ? "Система" : "System")}[/]")
             .Border(BoxBorder.Rounded)
             .BorderColor(Color.Grey);
 
@@ -116,33 +110,30 @@ public sealed class App
 
         if (!_sysInfo.IsWindows11)
         {
-            AnsiConsole.MarkupLine(
-                "[yellow bold][[!]] Обнаружена не Windows 11. Некоторые оптимизации могут быть неприменимы.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian 
+                ? "[yellow bold][[!]] Обнаружена не Windows 11. Некоторые оптимизации могут быть неприменимы.[/]"
+                : "[yellow bold][[!]] Not Windows 11 detected. Some optimizations may not apply.[/]");
             AnsiConsole.WriteLine();
         }
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  📊 Статус оптимизаций
-    // ═══════════════════════════════════════════════════════
 
     private async Task ShowStatusAsync()
     {
         var table = new Table()
             .Border(TableBorder.Rounded)
-            .Title("[bold cyan]Статус оптимизаций[/]")
-            .AddColumn(new TableColumn("[bold]Статус[/]").Centered())
-            .AddColumn("[bold]Имя[/]")
-            .AddColumn("[bold]Категория[/]")
-            .AddColumn("[bold]Риск[/]")
-            .AddColumn("[bold]Описание[/]");
+            .Title($"[bold cyan]{(Strings.IsRussian ? "Статус оптимизаций" : "Optimizations Status")}[/]")
+            .AddColumn(new TableColumn($"[bold]{(Strings.IsRussian ? "Статус" : "Status")}[/]").Centered())
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Имя" : "Name")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Категория" : "Category")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Риск" : "Risk")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Описание" : "Description")}[/]");
 
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .SpinnerStyle(Style.Parse("cyan"))
-            .StartAsync("Проверка состояния оптимизаций...", async _ =>
+            .StartAsync(Strings.CheckingStatus, async _ =>
             {
-                foreach (var opt in _optimizations.OrderBy(o => o.Info.Category))
+                var tasks = _optimizations.OrderBy(o => o.Info.Category).Select(async opt => 
                 {
                     bool isApplied;
                     try
@@ -154,7 +145,13 @@ public sealed class App
                         _logger.LogWarning(ex, "Ошибка проверки {Name}", opt.Info.Name);
                         isApplied = false;
                     }
+                    return (opt, isApplied);
+                });
 
+                var results = await Task.WhenAll(tasks);
+
+                foreach (var (opt, isApplied) in results)
+                {
                     var statusIcon = isApplied ? "[green]✓[/]" : "[grey]✗[/]";
                     var riskColor = GetRiskColor(opt.Info.RiskLevel);
 
@@ -170,81 +167,61 @@ public sealed class App
         AnsiConsole.Write(table);
     }
 
-    // ═══════════════════════════════════════════════════════
-    //  🚀 Применение оптимизаций
-    // ═══════════════════════════════════════════════════════
-
     private async Task ApplyOptimizationsAsync()
     {
-        // 1. Определяем, какие ещё не применены
         var notApplied = new List<IOptimization>();
 
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .SpinnerStyle(Style.Parse("cyan"))
-            .StartAsync("Проверка состояния...", async _ =>
+            .StartAsync(Strings.CheckingStatus, async _ =>
             {
-                foreach (var opt in _optimizations)
+                var tasks = _optimizations.Select(async opt => 
                 {
-                    try
-                    {
-                        if (!await opt.IsAppliedAsync())
-                            notApplied.Add(opt);
-                    }
-                    catch
-                    {
-                        notApplied.Add(opt); // При ошибке считаем «не применена»
-                    }
-                }
+                    try { return (opt, await opt.IsAppliedAsync()); }
+                    catch { return (opt, false); }
+                });
+                var results = await Task.WhenAll(tasks);
+                foreach(var r in results) if(!r.Item2) notApplied.Add(r.opt);
             });
 
         if (notApplied.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]Все оптимизации уже применены.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian ? "[green]Все оптимизации уже применены.[/]" : "[green]All optimizations are already applied.[/]");
             return;
         }
-
-        // 2. Мультивыбор
         var selected = AnsiConsole.Prompt(
             new MultiSelectionPrompt<IOptimization>()
-                .Title("[bold]Выберите оптимизации для применения:[/]")
+                .Title(Strings.SelectToApply)
                 .PageSize(15)
-                .InstructionsText("[grey](Пробел — выбрать/снять, Enter — подтвердить)[/]")
+                .InstructionsText(Strings.IsRussian ? "[grey](Пробел — выбрать/снять, Enter — подтвердить)[/]" : "[grey](Space - toggle, Enter - confirm)[/]")
                 .UseConverter(FormatChoice)
                 .AddChoices(notApplied.OrderBy(o => o.Info.Category)));
 
         if (selected.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Ничего не выбрано.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian ? "[yellow]Ничего не выбрано.[/]" : "[yellow]Nothing selected.[/]");
             return;
         }
-
-        // 3. Показываем что будет применено
-        ShowSelectionSummary("Будут применены", selected);
-
-        // 4. Подтверждение
-        if (!AnsiConsole.Confirm("[bold]Применить выбранные оптимизации?[/]"))
+        ShowSelectionSummary(Strings.IsRussian ? "Будут применены" : "Will be applied", selected);
+        if (!AnsiConsole.Confirm(Strings.ConfirmApply))
         {
-            AnsiConsole.MarkupLine("[grey]Отменено.[/]");
+            AnsiConsole.MarkupLine(Strings.Canceled);
             return;
         }
-
-        // 5. Точка восстановления (опционально)
-        if (AnsiConsole.Confirm("[grey]Создать точку восстановления перед применением?[/]", defaultValue: true))
+        if (AnsiConsole.Confirm(Strings.IsRussian ? "[grey]Создать точку восстановления перед применением?[/]" : "[grey]Create restore point before applying?[/]", defaultValue: true))
         {
             await AnsiConsole.Status()
                 .Spinner(Spinner.Known.Dots)
-                .StartAsync("Создание точки восстановления...", async _ =>
+                .StartAsync(Strings.IsRussian ? "Создание точки восстановления..." : "Creating restore point...", async _ =>
                 {
-                    var rpResult = await _backup.CreateRestorePointAsync("Перед оптимизацией");
+                    var rpResult = await _backup.CreateRestorePointAsync(Strings.IsRussian ? "Перед оптимизацией" : "Before optimization");
                     if (!rpResult.IsSuccess)
-                        AnsiConsole.MarkupLine($"[yellow][[!]] Точка восстановления: {Markup.Escape(rpResult.ErrorMessage ?? "ошибка")}[/]");
+                        AnsiConsole.MarkupLine($"[yellow][[!]] {(Strings.IsRussian ? "Ошибка" : "Error")}: {Markup.Escape(rpResult.ErrorMessage ?? "error")}[/]");
                     else
-                        AnsiConsole.MarkupLine("[green][[✓]] Точка восстановления создана[/]");
+                        AnsiConsole.MarkupLine($"[green][[✓]] {(Strings.IsRussian ? "Точка восстановления создана" : "Restore point created")}[/]");
                 });
         }
-
-        // 6. Применение с прогрессом
         AnsiConsole.WriteLine();
         var results = new List<(IOptimization Opt, OptimizationResult Result)>();
 
@@ -274,68 +251,53 @@ public sealed class App
                     }
                 }
             });
-
-        // 7. Результаты
         AnsiConsole.WriteLine();
-        ShowResults("Результаты применения", results);
+        ShowResults(Strings.IsRussian ? "Результаты применения" : "Apply Results", results);
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  ↩️ Откат оптимизаций
-    // ═══════════════════════════════════════════════════════
 
     private async Task RollbackOptimizationsAsync()
     {
-        // 1. Определяем, какие применены
         var applied = new List<IOptimization>();
 
         await AnsiConsole.Status()
             .Spinner(Spinner.Known.Dots)
             .SpinnerStyle(Style.Parse("cyan"))
-            .StartAsync("Проверка состояния...", async _ =>
+            .StartAsync(Strings.CheckingStatus, async _ =>
             {
-                foreach (var opt in _optimizations)
+                var tasks = _optimizations.Select(async opt => 
                 {
-                    try
-                    {
-                        if (await opt.IsAppliedAsync())
-                            applied.Add(opt);
-                    }
-                    catch { /* Игнорируем ошибки проверки */ }
-                }
+                    try { return (opt, await opt.IsAppliedAsync()); }
+                    catch { return (opt, false); }
+                });
+                var results = await Task.WhenAll(tasks);
+                foreach(var r in results) if(r.Item2) applied.Add(r.opt);
             });
 
         if (applied.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Нет применённых оптимизаций для отката.[/]");
+            AnsiConsole.MarkupLine(Strings.NoOptimizationsApplied);
             return;
         }
-
-        // 2. Мультивыбор
         var selected = AnsiConsole.Prompt(
             new MultiSelectionPrompt<IOptimization>()
-                .Title("[bold]Выберите оптимизации для отката:[/]")
+                .Title(Strings.SelectToRollback)
                 .PageSize(15)
-                .InstructionsText("[grey](Пробел — выбрать/снять, Enter — подтвердить)[/]")
+                .InstructionsText(Strings.IsRussian ? "[grey](Пробел — выбрать/снять, Enter — подтвердить)[/]" : "[grey](Space - toggle, Enter - confirm)[/]")
                 .UseConverter(FormatChoice)
                 .AddChoices(applied.OrderBy(o => o.Info.Category)));
 
         if (selected.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Ничего не выбрано.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian ? "[yellow]Ничего не выбрано.[/]" : "[yellow]Nothing selected.[/]");
             return;
         }
+        ShowSelectionSummary(Strings.IsRussian ? "Будут откачены" : "Will be rolled back", selected);
 
-        // 3. Подтверждение
-        ShowSelectionSummary("Будут откачены", selected);
-
-        if (!AnsiConsole.Confirm("[bold]Откатить выбранные оптимизации?[/]"))
+        if (!AnsiConsole.Confirm(Strings.ConfirmRollback))
         {
-            AnsiConsole.MarkupLine("[grey]Отменено.[/]");
+            AnsiConsole.MarkupLine(Strings.Canceled);
             return;
         }
-
-        // 4. Откат с прогрессом
         var results = new List<(IOptimization Opt, OptimizationResult Result)>();
 
         await AnsiConsole.Progress()
@@ -364,19 +326,13 @@ public sealed class App
                     }
                 }
             });
-
-        // 5. Результаты
         AnsiConsole.WriteLine();
-        ShowResults("Результаты отката", results);
+        ShowResults(Strings.IsRussian ? "Результаты отката" : "Rollback Results", results);
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  💾 Точка восстановления
-    // ═══════════════════════════════════════════════════════
 
     private async Task CreateRestorePointAsync()
     {
-        var description = AnsiConsole.Ask<string>("[bold]Описание точки восстановления:[/]");
+        var description = AnsiConsole.Ask<string>(Strings.IsRussian ? "[bold]Описание точки восстановления:[/]" : "[bold]Restore point description:[/]");
 
         OptimizationResult? result = null;
 
@@ -389,14 +345,10 @@ public sealed class App
             });
 
         if (result!.IsSuccess)
-            AnsiConsole.MarkupLine("[green][[✓]] Точка восстановления создана успешно.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian ? "[green][[✓]] Точка восстановления создана успешно.[/]" : "[green][[✓]] Restore point created successfully.[/]");
         else
-            AnsiConsole.MarkupLine($"[red][[✗]] {Markup.Escape(result.ErrorMessage ?? "Неизвестная ошибка")}[/]");
+            AnsiConsole.MarkupLine($"[red][[✗]] {Markup.Escape(result.ErrorMessage ?? "Error")}[/]");
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  📋 Управление бэкапами
-    // ═══════════════════════════════════════════════════════
 
     private async Task ShowBackupsAsync()
     {
@@ -404,18 +356,18 @@ public sealed class App
 
         if (backups.Count == 0)
         {
-            AnsiConsole.MarkupLine("[yellow]Нет сохранённых бэкапов.[/]");
+            AnsiConsole.MarkupLine(Strings.IsRussian ? "[yellow]Нет сохранённых бэкапов.[/]" : "[yellow]No saved backups.[/]");
             return;
         }
 
         var table = new Table()
             .Border(TableBorder.Rounded)
-            .Title($"[bold cyan]Бэкапы ({backups.Count})[/]")
+            .Title($"[bold cyan]{(Strings.IsRussian ? "Бэкапы" : "Backups")} ({backups.Count})[/]")
             .AddColumn("[bold]ID[/]")
-            .AddColumn("[bold]Модуль[/]")
-            .AddColumn("[bold]Тип[/]")
-            .AddColumn("[bold]Описание[/]")
-            .AddColumn("[bold]Дата[/]");
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Модуль" : "Module")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Тип" : "Type")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Описание" : "Description")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Дата" : "Date")}[/]");
 
         foreach (var entry in backups.OrderByDescending(b => b.CreatedAt))
         {
@@ -437,10 +389,6 @@ public sealed class App
 
         AnsiConsole.Write(table);
     }
-
-    // ═══════════════════════════════════════════════════════
-    //  Вспомогательные методы
-    // ═══════════════════════════════════════════════════════
 
     private static string FormatChoice(IOptimization opt)
     {
@@ -494,9 +442,9 @@ public sealed class App
         var table = new Table()
             .Border(TableBorder.Rounded)
             .Title($"[bold cyan]{title}[/]")
-            .AddColumn(new TableColumn("[bold]Статус[/]").Centered())
-            .AddColumn("[bold]Имя[/]")
-            .AddColumn("[bold]Детали[/]");
+            .AddColumn(new TableColumn($"[bold]{(Strings.IsRussian ? "Статус" : "Status")}[/]").Centered())
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Имя" : "Name")}[/]")
+            .AddColumn($"[bold]{(Strings.IsRussian ? "Детали" : "Details")}[/]");
 
         foreach (var (opt, result) in results)
         {
@@ -508,12 +456,12 @@ public sealed class App
                 status = "[green]✓[/]";
                 details = result.Warnings.Count > 0
                     ? $"[yellow]{Markup.Escape(string.Join("; ", result.Warnings))}[/]"
-                    : "[green]Успешно[/]";
+                    : (Strings.IsRussian ? "[green]Успешно[/]" : "[green]Success[/]");
             }
             else
             {
                 status = "[red]✗[/]";
-                details = $"[red]{Markup.Escape(result.ErrorMessage ?? "Ошибка")}[/]";
+                details = $"[red]{Markup.Escape(result.ErrorMessage ?? "Error")}[/]";
             }
 
             table.AddRow(status, Markup.Escape(opt.Info.Name), details);

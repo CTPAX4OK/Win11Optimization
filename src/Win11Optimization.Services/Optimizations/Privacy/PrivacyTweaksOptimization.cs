@@ -5,18 +5,6 @@ using Win11Optimization.Core.Models;
 using Win11Optimization.Services.Helpers;
 
 namespace Win11Optimization.Services.Optimizations.Privacy;
-
-/// <summary>
-/// Отключение рекламы, отслеживания активности и обратной связи.
-/// 
-/// Группа настроек приватности, не влияющих на функциональность системы:
-/// - Advertising ID — уникальный идентификатор для таргетированной рекламы
-/// - Activity History — история действий (Timeline) и синхронизация
-/// - Feedback — запросы обратной связи от Microsoft
-/// - App Launch Tracking — отслеживание запуска приложений для меню Пуск
-/// 
-/// Риск: Low — эти функции не влияют на стабильность системы.
-/// </summary>
 public sealed class PrivacyTweaksOptimization : IOptimization
 {
     private readonly IBackupManager _backup;
@@ -24,15 +12,10 @@ public sealed class PrivacyTweaksOptimization : IOptimization
 
     private static readonly (RegistryKey BaseKey, string SubKey, string Name, int Value, string Desc)[] Changes =
     [
-        // ── Advertising ID ──────────────────────────────
-        // Отключает уникальный рекламный идентификатор пользователя
         (Registry.LocalMachine,
          @"SOFTWARE\Policies\Microsoft\Windows\AdvertisingInfo",
          "DisabledByGroupPolicy", 1,
          "Advertising ID отключён"),
-
-        // ── Activity History / Timeline ─────────────────
-        // Отключает сбор и публикацию истории действий пользователя
         (Registry.LocalMachine,
          @"SOFTWARE\Policies\Microsoft\Windows\System",
          "EnableActivityFeed", 0,
@@ -47,16 +30,10 @@ public sealed class PrivacyTweaksOptimization : IOptimization
          @"SOFTWARE\Policies\Microsoft\Windows\System",
          "UploadUserActivities", 0,
          "Загрузка активности отключена"),
-
-        // ── Feedback Notifications ──────────────────────
-        // Отключает всплывающие запросы «Оцените Windows»
         (Registry.CurrentUser,
          @"SOFTWARE\Microsoft\Siuf\Rules",
          "NumberOfSIUFInPeriod", 0,
          "Запросы обратной связи отключены"),
-
-        // ── App Launch Tracking ─────────────────────────
-        // Отключает отслеживание запускаемых приложений (для «часто используемых» в Пуске)
         (Registry.CurrentUser,
          @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Advanced",
          "Start_TrackProgs", 0,
@@ -84,8 +61,6 @@ public sealed class PrivacyTweaksOptimization : IOptimization
         _backup = backup;
         _logger = logger;
     }
-
-    /// <inheritdoc />
     public Task<bool> IsAppliedAsync(CancellationToken ct = default)
     {
         foreach (var (baseKey, subKey, name, expectedValue, _) in Changes)
@@ -97,15 +72,12 @@ public sealed class PrivacyTweaksOptimization : IOptimization
 
         return Task.FromResult(true);
     }
-
-    /// <inheritdoc />
     public async Task<OptimizationResult> ApplyAsync(CancellationToken ct = default)
     {
         var warnings = new List<string>();
 
         try
         {
-            // 1. Бэкап (ветки могут не существовать — это нормально)
             foreach (var path in BackupPaths)
             {
                 try
@@ -117,8 +89,6 @@ public sealed class PrivacyTweaksOptimization : IOptimization
                     _logger.LogDebug("Ветка {Path} не существует, бэкап пропущен", path);
                 }
             }
-
-            // 2. Применяем все изменения
             foreach (var (baseKey, subKey, name, value, desc) in Changes)
             {
                 try
@@ -142,8 +112,6 @@ public sealed class PrivacyTweaksOptimization : IOptimization
             return OptimizationResult.Failure($"Ошибка: {ex.Message}", warnings);
         }
     }
-
-    /// <inheritdoc />
     public async Task<OptimizationResult> RollbackAsync(CancellationToken ct = default)
     {
         var warnings = new List<string>();
@@ -170,7 +138,6 @@ public sealed class PrivacyTweaksOptimization : IOptimization
         }
         else
         {
-            // Нет бэкапов — удаляем созданные значения
             foreach (var (baseKey, subKey, name, _, _) in Changes)
             {
                 try

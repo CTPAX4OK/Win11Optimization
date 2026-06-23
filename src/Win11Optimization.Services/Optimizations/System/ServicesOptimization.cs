@@ -5,20 +5,6 @@ using Win11Optimization.Core.Models;
 using Win11Optimization.Services.Helpers;
 
 namespace Win11Optimization.Services.Optimizations.System;
-
-/// <summary>
-/// Оптимизация фоновых служб Windows.
-/// Отключает службы, которые часто не нужны обычным пользователям и потребляют ресурсы:
-/// 
-/// - SysMain (Superfetch): кэширует приложения в RAM. На SSD часто вызывает 100% загрузку диска, лучше отключать.
-/// - DiagTrack (Connected User Experiences and Telemetry): сбор телеметрии.
-/// - dmwappushservice (WAP Push Message Routing Service): связано с телеметрией.
-/// 
-/// Риск: Medium — SysMain может немного замедлить запуск программ на старых HDD.
-/// 
-/// Механизм: изменение типа запуска служб через реестр.
-/// 2 = Automatic, 3 = Manual, 4 = Disabled.
-/// </summary>
 public sealed class ServicesOptimization : IOptimization
 {
     private readonly IBackupManager _backup;
@@ -26,19 +12,14 @@ public sealed class ServicesOptimization : IOptimization
 
     private static readonly (RegistryKey BaseKey, string SubKey, string Name, int Value, string Desc)[] Changes =
     [
-        // ── Отключение SysMain (Superfetch) ─────────────────
         (Registry.LocalMachine,
          @"SYSTEM\CurrentControlSet\Services\SysMain",
-         "Start", 4, // 4 = Disabled
+         "Start", 4,
          "Служба SysMain (Superfetch) отключена"),
-
-        // ── Отключение DiagTrack (Телеметрия) ───────────────
         (Registry.LocalMachine,
          @"SYSTEM\CurrentControlSet\Services\DiagTrack",
          "Start", 4,
          "Служба телеметрии (DiagTrack) отключена"),
-
-        // ── Отключение dmwappushservice (Телеметрия) ────────
         (Registry.LocalMachine,
          @"SYSTEM\CurrentControlSet\Services\dmwappushservice",
          "Start", 4,

@@ -5,16 +5,6 @@ using Win11Optimization.Core.Models;
 using Win11Optimization.Services.Helpers;
 
 namespace Win11Optimization.Services.Optimizations.System;
-
-/// <summary>
-/// Оптимизация визуальных эффектов (Настройки быстродействия).
-/// 
-/// Отключает прозрачность, анимации окон и теней для повышения
-/// отзывчивости интерфейса (особенно полезно на слабых GPU или виртуалках).
-/// Сглаживание шрифтов (ClearType) остается включенным!
-/// 
-/// Риск: Low — влияет только на внешний вид.
-/// </summary>
 public sealed class VisualEffectsOptimization : IOptimization
 {
     private readonly IBackupManager _backup;
@@ -22,19 +12,14 @@ public sealed class VisualEffectsOptimization : IOptimization
 
     private static readonly (RegistryKey BaseKey, string SubKey, string Name, int Value, string Desc)[] Changes =
     [
-        // Отключение эффектов прозрачности (Mica/Acrylic)
         (Registry.CurrentUser,
          @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize",
          "EnableTransparency", 0,
          "Прозрачность отключена"),
-
-        // Общая настройка быстродействия (VisualFXSetting: 2 = Adjust for best performance)
         (Registry.CurrentUser,
          @"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects",
          "VisualFXSetting", 2,
          "Установлен пресет 'Обеспечить наилучшее быстродействие'"),
-
-        // Отключение анимаций при минимизации/максимизации окон
         (Registry.CurrentUser,
          @"Control Panel\Desktop\WindowMetrics",
          "MinAnimate", 0,
@@ -66,7 +51,6 @@ public sealed class VisualEffectsOptimization : IOptimization
     {
         foreach (var (baseKey, subKey, name, expectedValue, _) in Changes)
         {
-            // У WindowMetrics значения могут храниться в виде строк, поэтому используем специальную проверку
             var val = baseKey.OpenSubKey(subKey)?.GetValue(name);
             if (val == null) return Task.FromResult(false);
 
@@ -109,7 +93,6 @@ public sealed class VisualEffectsOptimization : IOptimization
             {
                 try
                 {
-                    // MinAnimate в WindowMetrics должен быть REG_SZ, а не REG_DWORD!
                     if (subKey.Contains("WindowMetrics"))
                     {
                         using var key = baseKey.OpenSubKey(subKey, writable: true) ?? baseKey.CreateSubKey(subKey);
